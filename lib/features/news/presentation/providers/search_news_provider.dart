@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/error/app_error.dart';
+import '../../domain/entities/news_article.dart';
+import '../../domain/entities/paginated_news.dart';
 import '../../domain/usecases/search_news.dart';
 import 'news_providers.dart';
 import 'search_news_state.dart';
@@ -21,6 +24,19 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
     });
 
     return const SearchNewsState();
+  }
+
+  /// Generates a unique key for deduplicating news articles.
+  /// Uses article URL as primary unique identifier; falls back to available fields if URL is empty.
+  String _getArticleKey(NewsArticle article) {
+    final cleanUrl = article.url.trim();
+    if (cleanUrl.isNotEmpty) {
+      return 'url:$cleanUrl';
+    }
+    final cleanTitle = article.title.trim();
+    final timestamp = article.publishedAt?.millisecondsSinceEpoch ?? 0;
+    final source = article.source?.name.trim() ?? article.author?.trim() ?? '';
+    return 'fallback:$cleanTitle|$timestamp|$source';
   }
 
   /// Live search input handler with ~500ms debounce.
@@ -55,12 +71,19 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
       return;
     }
 
-    // Avoid duplicate requests for identical completed queries
-    if (cleanQuery == state.query && state.isLoaded) {
+    // Avoid duplicate requests for identical completed or loading queries
+    if (cleanQuery == state.query &&
+        (state.isLoaded || state.status == SearchStatus.loading)) {
       return;
     }
 
     final requestId = ++_currentRequestId;
+
+    if (kDebugMode) {
+      debugPrint(
+        '[SearchNewsNotifier] search start: query="$cleanQuery", page=1',
+      );
+    }
 
     // Reset pagination to page 1 and clear previous query results
     state = state.copyWith(
@@ -71,6 +94,7 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
       hasReachedMax: false,
       isLoadingMore: false,
       isRefreshing: false,
+      clearTotalResults: true,
       clearError: true,
       clearPaginationError: true,
     );
@@ -88,25 +112,57 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
         return;
       }
 
+      int? totalResults;
+      if (searchResults is PaginatedNews) {
+        totalResults = searchResults.totalResults;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SearchNewsNotifier] search response: count=${searchResults.length}, totalResults=$totalResults',
+        );
+      }
+
       if (searchResults.isEmpty) {
         state = state.copyWith(
           status: SearchStatus.empty,
           articles: const [],
           page: 1,
+          totalResults: totalResults ?? 0,
           hasReachedMax: true,
           clearError: true,
         );
       } else {
+        final bool hasReachedMax;
+        if (totalResults != null) {
+          hasReachedMax = searchResults.length >= totalResults ||
+              (totalResults > 0 && 1 * ApiConstants.defaultPageSize >= totalResults);
+        } else {
+          hasReachedMax = searchResults.length < ApiConstants.defaultPageSize;
+        }
+
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] search success: articles=${searchResults.length}, totalResults=$totalResults, hasMore=${!hasReachedMax}',
+          );
+        }
+
         state = state.copyWith(
           status: SearchStatus.loaded,
           articles: searchResults,
           page: 1,
-          hasReachedMax: searchResults.length < ApiConstants.defaultPageSize,
+          totalResults: totalResults,
+          hasReachedMax: hasReachedMax,
           clearError: true,
         );
       }
     } on AppError catch (e) {
       if (requestId == _currentRequestId) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] search error: code=${e.code}, message="${e.message}"',
+          );
+        }
         state = state.copyWith(
           status: SearchStatus.error,
           errorMessage: e.message,
@@ -114,6 +170,11 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
       }
     } catch (_) {
       if (requestId == _currentRequestId) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] search unexpected error for query="$cleanQuery"',
+          );
+        }
         state = state.copyWith(
           status: SearchStatus.error,
           errorMessage:
@@ -140,7 +201,15 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
       return;
     }
 
+    final requestId = _currentRequestId;
     final nextPage = state.page + 1;
+
+    if (kDebugMode) {
+      debugPrint(
+        '[SearchNewsNotifier] fetchNextPage requested: query="${state.query}", nextPage=$nextPage',
+      );
+    }
+
     state = state.copyWith(
       isLoadingMore: true,
       clearPaginationError: true,
@@ -154,41 +223,93 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
         pageSize: ApiConstants.defaultPageSize,
       );
 
+      // Verify this request is still the latest one
+      if (requestId != _currentRequestId) {
+        return;
+      }
+
       if (newArticles.isEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] fetchNextPage returned empty list for page $nextPage. Reached end of search cleanly.',
+          );
+        }
         state = state.copyWith(
           isLoadingMore: false,
           hasReachedMax: true,
-        );
-      } else {
-        // Prevent duplicate articles by checking stable URLs and titles
-        final existingUrls = state.articles
-            .map((a) => a.url)
-            .where((u) => u.isNotEmpty)
-            .toSet();
-        final existingTitles = state.articles.map((a) => a.title).toSet();
-
-        final uniqueNewArticles = newArticles.where((a) {
-          if (a.url.isNotEmpty && existingUrls.contains(a.url)) return false;
-          if (existingTitles.contains(a.title)) return false;
-          return true;
-        }).toList();
-
-        final combined = [...state.articles, ...uniqueNewArticles];
-        state = state.copyWith(
-          status: SearchStatus.loaded,
-          articles: combined,
-          page: nextPage,
-          isLoadingMore: false,
-          hasReachedMax: newArticles.length < ApiConstants.defaultPageSize,
           clearPaginationError: true,
         );
+        return;
       }
-    } on AppError catch (e) {
+
+      int? totalResults;
+      if (newArticles is PaginatedNews) {
+        totalResults = newArticles.totalResults;
+      }
+      final effectiveTotal = totalResults ?? state.totalResults;
+
+      // Prevent duplicate articles by checking URLs (with safe fallback)
+      final existingKeys = state.articles.map(_getArticleKey).toSet();
+      final uniqueNewArticles = newArticles
+          .where((a) => !existingKeys.contains(_getArticleKey(a)))
+          .toList();
+
+      final combined = [...state.articles, ...uniqueNewArticles];
+
+      final bool hasReachedMax;
+      if (effectiveTotal != null) {
+        hasReachedMax = combined.length >= effectiveTotal ||
+            (effectiveTotal > 0 && nextPage * ApiConstants.defaultPageSize >= effectiveTotal) ||
+            uniqueNewArticles.isEmpty;
+      } else {
+        hasReachedMax = newArticles.length < ApiConstants.defaultPageSize;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SearchNewsNotifier] fetchNextPage success: page=$nextPage, returned=${newArticles.length}, added=${uniqueNewArticles.length}, totalArticles=${combined.length}, totalResults=$effectiveTotal, hasMore=${!hasReachedMax}',
+        );
+      }
+
       state = state.copyWith(
+        status: SearchStatus.loaded,
+        articles: combined,
+        page: nextPage,
+        totalResults: effectiveTotal,
         isLoadingMore: false,
-        paginationErrorMessage: e.message,
+        hasReachedMax: hasReachedMax,
+        clearPaginationError: true,
       );
+    } on AppError catch (e) {
+      if (requestId != _currentRequestId) return;
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SearchNewsNotifier] fetchNextPage error: code=${e.code}, message="${e.message}"',
+        );
+      }
+
+      if (e.code == 'maximumResultsReached' || e.code == 'HTTP_426') {
+        state = state.copyWith(
+          isLoadingMore: false,
+          hasReachedMax: true,
+          clearPaginationError: true,
+        );
+      } else {
+        state = state.copyWith(
+          isLoadingMore: false,
+          paginationErrorMessage: e.message,
+        );
+      }
     } catch (_) {
+      if (requestId != _currentRequestId) return;
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SearchNewsNotifier] fetchNextPage unexpected error for page $nextPage',
+        );
+      }
+
       state = state.copyWith(
         isLoadingMore: false,
         paginationErrorMessage: 'Failed to load more articles. Tap to retry.',
@@ -198,8 +319,16 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
 
   /// Pull-to-refresh handler fetching page 1 for the current search query.
   Future<void> refresh() async {
-    if (state.isRefreshing || state.query.isEmpty) {
+    if (state.isRefreshing || state.isLoadingMore || state.query.isEmpty) {
       return;
+    }
+
+    final requestId = ++_currentRequestId;
+
+    if (kDebugMode) {
+      debugPrint(
+        '[SearchNewsNotifier] refresh start: query="${state.query}"',
+      );
     }
 
     state = state.copyWith(
@@ -215,37 +344,80 @@ class SearchNewsNotifier extends Notifier<SearchNewsState> {
         pageSize: ApiConstants.defaultPageSize,
       );
 
+      if (requestId != _currentRequestId) {
+        return;
+      }
+
+      int? totalResults;
+      if (refreshed is PaginatedNews) {
+        totalResults = refreshed.totalResults;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SearchNewsNotifier] refresh response: count=${refreshed.length}, totalResults=$totalResults',
+        );
+      }
+
       if (refreshed.isEmpty) {
         state = state.copyWith(
           status: SearchStatus.empty,
           articles: const [],
           page: 1,
+          totalResults: totalResults ?? 0,
           hasReachedMax: true,
           isRefreshing: false,
           clearError: true,
         );
       } else {
+        final bool hasReachedMax;
+        if (totalResults != null) {
+          hasReachedMax = refreshed.length >= totalResults ||
+              (totalResults > 0 && 1 * ApiConstants.defaultPageSize >= totalResults);
+        } else {
+          hasReachedMax = refreshed.length < ApiConstants.defaultPageSize;
+        }
+
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] refresh success: articles=${refreshed.length}, totalResults=$totalResults, hasMore=${!hasReachedMax}',
+          );
+        }
+
         state = state.copyWith(
           status: SearchStatus.loaded,
           articles: refreshed,
           page: 1,
-          hasReachedMax: refreshed.length < ApiConstants.defaultPageSize,
+          totalResults: totalResults,
+          hasReachedMax: hasReachedMax,
           isRefreshing: false,
           clearError: true,
         );
       }
     } on AppError catch (e) {
-      state = state.copyWith(
-        isRefreshing: false,
-        errorMessage: state.articles.isEmpty ? e.message : null,
-      );
+      if (requestId == _currentRequestId) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SearchNewsNotifier] refresh error: code=${e.code}, message="${e.message}"',
+          );
+        }
+        state = state.copyWith(
+          isRefreshing: false,
+          errorMessage: state.articles.isEmpty ? e.message : null,
+        );
+      }
     } catch (_) {
-      state = state.copyWith(
-        isRefreshing: false,
-        errorMessage: state.articles.isEmpty
-            ? 'Failed to refresh search results. Please try again.'
-            : null,
-      );
+      if (requestId == _currentRequestId) {
+        if (kDebugMode) {
+          debugPrint('[SearchNewsNotifier] refresh unexpected error');
+        }
+        state = state.copyWith(
+          isRefreshing: false,
+          errorMessage: state.articles.isEmpty
+              ? 'Failed to refresh search results. Please try again.'
+              : null,
+        );
+      }
     }
   }
 }

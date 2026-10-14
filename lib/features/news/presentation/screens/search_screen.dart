@@ -53,7 +53,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
 
-    if (currentScroll >= maxScroll - 250) {
+    if (currentScroll > 0 && currentScroll >= maxScroll - 250) {
       ref.read(searchNewsNotifierProvider.notifier).fetchNextPage();
     }
   }
@@ -62,6 +62,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final clean = query.trim();
     if (clean.isNotEmpty) {
       _focusNode.unfocus();
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
       ref.read(searchNewsNotifierProvider.notifier).search(clean);
     }
   }
@@ -69,6 +72,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   void _onClear() {
     _searchController.clear();
     setState(() {});
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
     ref.read(searchNewsNotifierProvider.notifier).clearSearch();
   }
 
@@ -188,83 +194,93 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return RefreshIndicator(
       key: const Key('search_refresh_indicator'),
       onRefresh: () => notifier.refresh(),
-      child: ListView.builder(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: state.articles.length +
-            (state.isLoadingMore || state.paginationErrorMessage != null
-                ? 1
-                : 0),
-        itemBuilder: (context, index) {
-          // Pagination footer slot
-          if (index == state.articles.length) {
-            if (state.isLoadingMore) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                ),
-              );
-            }
-
-            if (state.paginationErrorMessage != null) {
-              return Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Card(
-                  elevation: 0,
-                  color: colorScheme.errorContainer.withValues(alpha: 0.4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            state.paginationErrorMessage!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onErrorContainer,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        TextButton.icon(
-                          key: const Key('search_pagination_retry_button'),
-                          onPressed: () => notifier.fetchNextPage(),
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('Retry'),
-                        ),
-                      ],
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (scrollInfo) {
+          if (scrollInfo.metrics.pixels > 0 &&
+              scrollInfo.metrics.pixels >=
+                  scrollInfo.metrics.maxScrollExtent - 250) {
+            notifier.fetchNextPage();
+          }
+          return false;
+        },
+        child: ListView.builder(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: state.articles.length +
+              (state.isLoadingMore || state.paginationErrorMessage != null
+                  ? 1
+                  : 0),
+          itemBuilder: (context, index) {
+            // Pagination footer slot
+            if (index == state.articles.length) {
+              if (state.isLoadingMore) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
                     ),
                   ),
-                ),
-              );
+                );
+              }
+
+              if (state.paginationErrorMessage != null) {
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Card(
+                    elevation: 0,
+                    color: colorScheme.errorContainer.withValues(alpha: 0.4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              state.paginationErrorMessage!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onErrorContainer,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            key: const Key('search_pagination_retry_button'),
+                            onPressed: () => notifier.fetchNextPage(),
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              return const SizedBox.shrink();
             }
 
-            return const SizedBox.shrink();
-          }
+            final article = state.articles[index];
+            final stableKey = article.url.isNotEmpty
+                ? 'search_article_${article.url}'
+                : 'search_article_${article.title}_$index';
 
-          final article = state.articles[index];
-          final stableKey = article.url.isNotEmpty
-              ? 'search_article_${article.url}'
-              : 'search_article_${article.title}_$index';
-
-          return NewsArticleCard(
-            key: Key(stableKey),
-            article: article,
-            onTap: () {
-              context.push(AppRouter.newsDetailPath, extra: article);
-            },
-          );
-        },
+            return NewsArticleCard(
+              key: Key(stableKey),
+              article: article,
+              onTap: () {
+                context.push(AppRouter.newsDetailPath, extra: article);
+              },
+            );
+          },
+        ),
       ),
     );
   }

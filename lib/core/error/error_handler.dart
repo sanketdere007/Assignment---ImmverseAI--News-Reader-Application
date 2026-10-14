@@ -135,6 +135,14 @@ abstract final class ErrorHandler {
         response?.data,
       );
     }
+    if (normalizedCode == 'maximumresultsreached' || statusCode == 426) {
+      return ServerError(
+        apiMessage ?? 'Maximum results reached for the current API plan.',
+        statusCode,
+        'maximumResultsReached',
+        response?.data,
+      );
+    }
 
     switch (statusCode) {
       case 401:

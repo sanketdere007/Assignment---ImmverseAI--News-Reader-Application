@@ -8,6 +8,7 @@ import 'package:quicknews/features/news/data/models/news_response_model.dart';
 import 'package:quicknews/features/news/data/models/news_source_model.dart';
 import 'package:quicknews/features/news/data/repositories/news_repository_impl.dart';
 import 'package:quicknews/features/news/domain/entities/news_article.dart';
+import 'package:quicknews/features/news/domain/entities/paginated_news.dart';
 
 class FakeNewsRemoteDataSource implements NewsRemoteDataSource {
   Future<NewsResponseModel> Function({
@@ -125,6 +126,8 @@ void main() {
       );
 
       expect(articles, isA<List<NewsArticle>>());
+      expect(articles, isA<PaginatedNews>());
+      expect((articles as PaginatedNews).totalResults, 1);
       expect(articles.length, 1);
       expect(articles.first.title, 'New Gadget Launched');
       expect(articles.first.sourceName, 'The Verge');
@@ -258,6 +261,9 @@ void main() {
         domains: 'wsj.com',
       );
 
+      expect(articles, isA<List<NewsArticle>>());
+      expect(articles, isA<PaginatedNews>());
+      expect((articles as PaginatedNews).totalResults, 1);
       expect(articles.length, 1);
       expect(articles.first.title, 'New Gadget Launched');
     });

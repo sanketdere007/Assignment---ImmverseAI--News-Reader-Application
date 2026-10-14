@@ -264,6 +264,33 @@ void main() {
       expect(find.text('Results for "buis"'), findsOneWidget);
       expect(find.byType(NewsArticleCard), findsOneWidget);
     });
+
+    testWidgets('displays CircularProgressIndicator footer when isLoadingMore is true', (tester) async {
+      await tester.pumpWidget(createWidgetUnderTest(
+        initialState: NewsFeedState(
+          status: NewsFeedStatus.loaded,
+          articles: [tArticle],
+          isLoadingMore: true,
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('displays pagination error card with retry button when paginationErrorMessage is set', (tester) async {
+      await tester.pumpWidget(createWidgetUnderTest(
+        initialState: NewsFeedState(
+          status: NewsFeedStatus.loaded,
+          articles: [tArticle],
+          paginationErrorMessage: 'Network failure during scroll',
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Network failure during scroll'), findsOneWidget);
+      expect(find.byKey(const Key('pagination_retry_button')), findsOneWidget);
+    });
   });
 }
 

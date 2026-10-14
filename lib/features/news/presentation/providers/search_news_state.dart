@@ -34,6 +34,9 @@ class SearchNewsState {
   /// Current pagination page number (1-indexed).
   final int page;
 
+  /// Total count of articles reported by the News API.
+  final int? totalResults;
+
   /// Whether all pages of matching articles have been retrieved.
   final bool hasReachedMax;
 
@@ -54,12 +57,16 @@ class SearchNewsState {
     this.articles = const [],
     this.query = '',
     this.page = 1,
+    this.totalResults,
     this.hasReachedMax = false,
     this.isLoadingMore = false,
     this.isRefreshing = false,
     this.errorMessage,
     this.paginationErrorMessage,
   });
+
+  /// True when more results are available for pagination.
+  bool get hasMore => !hasReachedMax;
 
   /// True when no search has been initiated yet.
   bool get isInitial => status == SearchStatus.initial;
@@ -82,11 +89,13 @@ class SearchNewsState {
     List<NewsArticle>? articles,
     String? query,
     int? page,
+    int? totalResults,
     bool? hasReachedMax,
     bool? isLoadingMore,
     bool? isRefreshing,
     String? errorMessage,
     String? paginationErrorMessage,
+    bool clearTotalResults = false,
     bool clearError = false,
     bool clearPaginationError = false,
   }) {
@@ -95,6 +104,8 @@ class SearchNewsState {
       articles: articles ?? this.articles,
       query: query ?? this.query,
       page: page ?? this.page,
+      totalResults:
+          clearTotalResults ? null : (totalResults ?? this.totalResults),
       hasReachedMax: hasReachedMax ?? this.hasReachedMax,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isRefreshing: isRefreshing ?? this.isRefreshing,
@@ -114,6 +125,7 @@ class SearchNewsState {
           listEquals(articles, other.articles) &&
           query == other.query &&
           page == other.page &&
+          totalResults == other.totalResults &&
           hasReachedMax == other.hasReachedMax &&
           isLoadingMore == other.isLoadingMore &&
           isRefreshing == other.isRefreshing &&
@@ -126,6 +138,7 @@ class SearchNewsState {
         Object.hashAll(articles),
         query,
         page,
+        totalResults,
         hasReachedMax,
         isLoadingMore,
         isRefreshing,
@@ -135,5 +148,5 @@ class SearchNewsState {
 
   @override
   String toString() =>
-      'SearchNewsState(status: $status, query: "$query", page: $page, articles: ${articles.length}, hasReachedMax: $hasReachedMax)';
+      'SearchNewsState(status: $status, query: "$query", page: $page, totalResults: $totalResults, articles: ${articles.length}, hasReachedMax: $hasReachedMax)';
 }

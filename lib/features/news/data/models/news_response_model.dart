@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:json_annotation/json_annotation.dart';
 import '../../domain/entities/news_article.dart';
+import '../../domain/entities/paginated_news.dart';
 import 'news_article_model.dart';
 
 part 'news_response_model.g.dart';
@@ -46,6 +47,14 @@ class NewsResponseModel {
   List<NewsArticle> toEntities() {
     return articles?.map((article) => article.toEntity()).toList() ??
         const <NewsArticle>[];
+  }
+
+  /// Converts this response model to domain [PaginatedNews] containing articles and totalResults.
+  PaginatedNews toPaginatedNews() {
+    return PaginatedNews(
+      articles: toEntities(),
+      totalResults: totalResults ?? articles?.length ?? 0,
+    );
   }
 
   NewsResponseModel copyWith({

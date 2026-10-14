@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quicknews/core/error/app_error.dart';
 import 'package:quicknews/features/news/domain/entities/news_article.dart';
+import 'package:quicknews/features/news/domain/entities/paginated_news.dart';
 import 'package:quicknews/features/news/domain/entities/news_source.dart';
 import 'package:quicknews/features/news/domain/repositories/news_repository.dart';
 import 'package:quicknews/features/news/domain/usecases/search_news.dart';
@@ -532,6 +533,116 @@ void main() {
         expect(state.query, 'buis');
         expect(state.articles, isEmpty);
         expect(state.hasReachedMax, isTrue);
+      },
+    );
+
+    test(
+      '18. Smaller search response than pageSize with totalResults > count leaves hasMore=true and paginates page 2',
+      () async {
+        final page1 = List.generate(14, (i) => createArticle('search_p1_$i'));
+        final page2 = List.generate(10, (i) => createArticle('search_p2_$i'));
+
+        mockRepository.onSearchNews =
+            ({required query, domains, page = 1, pageSize = 20, sortBy}) {
+              if (page == 1) {
+                return PaginatedNews(articles: page1, totalResults: 40);
+              }
+              if (page == 2) {
+                return PaginatedNews(articles: page2, totalResults: 40);
+              }
+              return PaginatedNews(articles: [], totalResults: 40);
+            };
+
+        final notifier = container.read(searchNewsNotifierProvider.notifier);
+        await notifier.search('quantum computing');
+
+        var state = container.read(searchNewsNotifierProvider);
+        expect(state.status, SearchStatus.loaded);
+        expect(state.articles.length, 14);
+        expect(state.totalResults, 40);
+        expect(state.page, 1);
+        expect(state.hasReachedMax, isFalse);
+        expect(state.hasMore, isTrue);
+
+        await notifier.fetchNextPage();
+
+        state = container.read(searchNewsNotifierProvider);
+        expect(state.articles.length, 24);
+        expect(state.page, 2);
+        expect(state.hasReachedMax, isTrue); // 2 * 20 = 40 >= 40
+        expect(state.hasMore, isFalse);
+      },
+    );
+
+    test(
+      '19. API limit maximumResultsReached cleanly stops search pagination without error banner',
+      () async {
+        final initialArticles = List.generate(20, (i) => createArticle('search_$i'));
+
+        mockRepository.onSearchNews =
+            ({required query, domains, page = 1, pageSize = 20, sortBy}) {
+              if (page == 1) {
+                return PaginatedNews(articles: initialArticles, totalResults: 100);
+              }
+              throw const ServerError('Maximum results reached.', 426, 'maximumResultsReached');
+            };
+
+        final notifier = container.read(searchNewsNotifierProvider.notifier);
+        await notifier.search('technology');
+
+        await notifier.fetchNextPage();
+        final state = container.read(searchNewsNotifierProvider);
+
+        expect(state.articles.length, 20);
+        expect(state.isLoadingMore, isFalse);
+        expect(state.hasReachedMax, isTrue);
+        expect(state.hasMore, isFalse);
+        expect(state.paginationErrorMessage, isNull);
+      },
+    );
+
+    test(
+      '20. Failed search pagination retains current page and recovers on retry',
+      () async {
+        final initialArticles = List.generate(20, (i) => createArticle('init_$i'));
+        final page2Articles = [createArticle('page2_item')];
+        var page2Attempt = 0;
+
+        mockRepository.onSearchNews =
+            ({required query, domains, page = 1, pageSize = 20, sortBy}) {
+              if (page == 1) {
+                return PaginatedNews(articles: initialArticles, totalResults: 50);
+              }
+              if (page == 2) {
+                page2Attempt++;
+                if (page2Attempt == 1) {
+                  throw const TimeoutError('Search pagination timeout');
+                }
+                return PaginatedNews(articles: page2Articles, totalResults: 50);
+              }
+              return [];
+            };
+
+        final notifier = container.read(searchNewsNotifierProvider.notifier);
+        await notifier.search('astronomy');
+
+        // First attempt fails
+        await notifier.fetchNextPage();
+        var state = container.read(searchNewsNotifierProvider);
+
+        expect(state.articles.length, 20);
+        expect(state.page, 1);
+        expect(state.isLoadingMore, isFalse);
+        expect(state.paginationErrorMessage, 'Search pagination timeout');
+
+        // Retry succeeds
+        await notifier.fetchNextPage();
+        state = container.read(searchNewsNotifierProvider);
+
+        expect(state.articles.length, 21);
+        expect(state.page, 2);
+        expect(state.isLoadingMore, isFalse);
+        expect(state.paginationErrorMessage, isNull);
       },
     );
   });

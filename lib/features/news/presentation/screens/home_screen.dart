@@ -59,8 +59,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
 
-    // Trigger next page when within 250 pixels of the scroll boundary
-    if (currentScroll >= maxScroll - 250) {
+    // Trigger next page when scrolling towards bottom and within 250 pixels of the scroll boundary
+    if (currentScroll > 0 && currentScroll >= maxScroll - 250) {
       ref.read(newsFeedNotifierProvider.notifier).fetchNextPage();
     }
   }
@@ -70,6 +70,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final clean = query.trim();
     if (clean.isEmpty) {
       if (ref.read(newsFeedNotifierProvider).isSearching) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
         ref.read(newsFeedNotifierProvider.notifier).clearSearch();
       }
       setState(() {});
@@ -80,6 +83,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       if (mounted) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
         ref.read(newsFeedNotifierProvider.notifier).search(clean);
       }
     });
@@ -90,6 +96,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final clean = query.trim();
     if (clean.isNotEmpty) {
       FocusScope.of(context).unfocus();
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
       ref.read(newsFeedNotifierProvider.notifier).search(clean);
     }
   }
@@ -101,6 +110,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _isSearchActive = false;
     });
     FocusScope.of(context).unfocus();
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
     ref.read(newsFeedNotifierProvider.notifier).clearSearch();
   }
 
@@ -236,6 +248,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   CategorySelector(
                     selectedCategory: feedState.selectedCategory,
                     onCategorySelected: (category) {
+                      if (_scrollController.hasClients) {
+                        _scrollController.jumpTo(0);
+                      }
                       notifier.changeCategory(category);
                     },
                   ),
@@ -335,84 +350,94 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return RefreshIndicator(
       key: const Key('news_refresh_indicator'),
       onRefresh: () => notifier.refresh(),
-      child: ListView.builder(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: state.articles.length +
-            (state.isLoadingMore || state.paginationErrorMessage != null
-                ? 1
-                : 0),
-        itemBuilder: (context, index) {
-          // If we reached the footer slot
-          if (index == state.articles.length) {
-            if (state.isLoadingMore) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                ),
-              );
-            }
-
-            if (state.paginationErrorMessage != null) {
-              return Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Card(
-                  elevation: 0,
-                  color: colorScheme.errorContainer.withValues(alpha: 0.4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            state.paginationErrorMessage!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onErrorContainer,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        TextButton.icon(
-                          key: const Key('pagination_retry_button'),
-                          onPressed: () => notifier.fetchNextPage(),
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('Retry'),
-                        ),
-                      ],
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (scrollInfo) {
+          if (scrollInfo.metrics.pixels > 0 &&
+              scrollInfo.metrics.pixels >=
+                  scrollInfo.metrics.maxScrollExtent - 250) {
+            notifier.fetchNextPage();
+          }
+          return false;
+        },
+        child: ListView.builder(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: state.articles.length +
+              (state.isLoadingMore || state.paginationErrorMessage != null
+                  ? 1
+                  : 0),
+          itemBuilder: (context, index) {
+            // If we reached the footer slot
+            if (index == state.articles.length) {
+              if (state.isLoadingMore) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
                     ),
                   ),
-                ),
-              );
+                );
+              }
+
+              if (state.paginationErrorMessage != null) {
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Card(
+                    elevation: 0,
+                    color: colorScheme.errorContainer.withValues(alpha: 0.4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              state.paginationErrorMessage!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onErrorContainer,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            key: const Key('pagination_retry_button'),
+                            onPressed: () => notifier.fetchNextPage(),
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              return const SizedBox.shrink();
             }
 
-            return const SizedBox.shrink();
-          }
+            final article = state.articles[index];
+            final stableKey = article.url.isNotEmpty
+                ? 'article_${article.url}'
+                : 'article_${article.title}_$index';
 
-          final article = state.articles[index];
-          final stableKey = article.url.isNotEmpty
-              ? 'article_${article.url}'
-              : 'article_${article.title}_$index';
-
-          return NewsArticleCard(
-            key: Key(stableKey),
-            article: article,
-            onTap: () {
-              // Navigates to article detail with selected entity
-              context.push(AppRouter.newsDetailPath, extra: article);
-            },
-          );
-        },
+            return NewsArticleCard(
+              key: Key(stableKey),
+              article: article,
+              onTap: () {
+                // Navigates to article detail with selected entity
+                context.push(AppRouter.newsDetailPath, extra: article);
+              },
+            );
+          },
+        ),
       ),
     );
   }

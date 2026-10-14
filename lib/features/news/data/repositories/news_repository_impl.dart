@@ -40,7 +40,7 @@ class NewsRepositoryImpl implements NewsRepository {
         pageSize: pageSize,
       );
 
-      return responseModel.toEntities();
+      return responseModel.toPaginatedNews();
     } on AppError {
       rethrow;
     } on DioException catch (e) {
@@ -69,7 +69,7 @@ class NewsRepositoryImpl implements NewsRepository {
         pageSize: pageSize,
       );
 
-      return responseModel.toEntities();
+      return responseModel.toPaginatedNews();
     } on AppError {
       rethrow;
     } on DioException catch (e) {

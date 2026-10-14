@@ -218,6 +218,8 @@ class NewsRemoteDataSourceImpl implements NewsRemoteDataSource {
           throw UnauthorizedError(message, model.code, data);
         } else if (errorCode == 'ratelimited' || errorCode == 'apikeyexhausted') {
           throw RateLimitError(message, model.code, data);
+        } else if (errorCode == 'maximumresultsreached') {
+          throw ServerError(message, response.statusCode, 'maximumResultsReached', data);
         } else {
           throw ServerError(message, response.statusCode, model.code, data);
         }

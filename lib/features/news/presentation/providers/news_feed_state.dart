@@ -37,6 +37,9 @@ class NewsFeedState {
   /// Current pagination page number (1-indexed).
   final int page;
 
+  /// Total count of articles reported by the News API.
+  final int? totalResults;
+
   /// Whether the end of the news feed has been reached.
   final bool hasReachedMax;
 
@@ -58,12 +61,16 @@ class NewsFeedState {
     this.selectedCategory = 'general',
     this.searchQuery,
     this.page = 1,
+    this.totalResults,
     this.hasReachedMax = false,
     this.isLoadingMore = false,
     this.isRefreshing = false,
     this.errorMessage,
     this.paginationErrorMessage,
   });
+
+  /// True when more results are available for pagination.
+  bool get hasMore => !hasReachedMax;
 
   /// True when the feed is loading its initial set of articles.
   bool get isInitialLoading =>
@@ -88,12 +95,14 @@ class NewsFeedState {
     String? selectedCategory,
     String? searchQuery,
     int? page,
+    int? totalResults,
     bool? hasReachedMax,
     bool? isLoadingMore,
     bool? isRefreshing,
     String? errorMessage,
     String? paginationErrorMessage,
     bool clearSearchQuery = false,
+    bool clearTotalResults = false,
     bool clearError = false,
     bool clearPaginationError = false,
   }) {
@@ -103,6 +112,8 @@ class NewsFeedState {
       selectedCategory: selectedCategory ?? this.selectedCategory,
       searchQuery: clearSearchQuery ? null : (searchQuery ?? this.searchQuery),
       page: page ?? this.page,
+      totalResults:
+          clearTotalResults ? null : (totalResults ?? this.totalResults),
       hasReachedMax: hasReachedMax ?? this.hasReachedMax,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isRefreshing: isRefreshing ?? this.isRefreshing,
@@ -123,6 +134,7 @@ class NewsFeedState {
           selectedCategory == other.selectedCategory &&
           searchQuery == other.searchQuery &&
           page == other.page &&
+          totalResults == other.totalResults &&
           hasReachedMax == other.hasReachedMax &&
           isLoadingMore == other.isLoadingMore &&
           isRefreshing == other.isRefreshing &&
@@ -136,6 +148,7 @@ class NewsFeedState {
         selectedCategory,
         searchQuery,
         page,
+        totalResults,
         hasReachedMax,
         isLoadingMore,
         isRefreshing,
@@ -145,5 +158,5 @@ class NewsFeedState {
 
   @override
   String toString() =>
-      'NewsFeedState(status: $status, category: $selectedCategory, search: $searchQuery, page: $page, articles: ${articles.length}, hasReachedMax: $hasReachedMax)';
+      'NewsFeedState(status: $status, category: $selectedCategory, search: $searchQuery, page: $page, totalResults: $totalResults, articles: ${articles.length}, hasReachedMax: $hasReachedMax)';
 }

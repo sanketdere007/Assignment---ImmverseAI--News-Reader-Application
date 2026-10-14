@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quicknews/core/error/app_error.dart';
 import 'package:quicknews/features/news/domain/entities/news_article.dart';
+import 'package:quicknews/features/news/domain/entities/paginated_news.dart';
 import 'package:quicknews/features/news/domain/entities/news_source.dart';
 import 'package:quicknews/features/news/domain/repositories/news_repository.dart';
 import 'package:quicknews/features/news/domain/usecases/get_top_headlines.dart';
@@ -468,6 +469,144 @@ void main() {
       expect(state.status, NewsFeedStatus.empty);
       expect(state.articles, isEmpty);
       expect(state.hasReachedMax, isTrue);
+    });
+
+    test('17. Smaller response than pageSize with totalResults > count leaves hasMore=true and paginates page 2', () async {
+      final page1Articles = List.generate(12, (i) => createArticle('item_p1_$i'));
+      final page2Articles = List.generate(10, (i) => createArticle('item_p2_$i'));
+
+      mockRepository.onGetTopHeadlines = ({category, country, sources, page = 1, pageSize = 20, query}) {
+        if (page == 1) {
+          return PaginatedNews(articles: page1Articles, totalResults: 35);
+        }
+        if (page == 2) {
+          return PaginatedNews(articles: page2Articles, totalResults: 35);
+        }
+        return PaginatedNews(articles: [], totalResults: 35);
+      };
+
+      final notifier = container.read(newsFeedNotifierProvider.notifier);
+      await notifier.loadInitialHeadlines();
+
+      var state = container.read(newsFeedNotifierProvider);
+      expect(state.status, NewsFeedStatus.loaded);
+      expect(state.articles.length, 12);
+      expect(state.totalResults, 35);
+      expect(state.page, 1);
+      // Key fix: 12 articles loaded < 35 totalResults -> hasReachedMax is false, hasMore is true!
+      expect(state.hasReachedMax, isFalse);
+      expect(state.hasMore, isTrue);
+
+      // Scroll to trigger page 2
+      await notifier.fetchNextPage();
+
+      state = container.read(newsFeedNotifierProvider);
+      expect(state.status, NewsFeedStatus.loaded);
+      expect(state.articles.length, 22);
+      expect(state.page, 2);
+      expect(state.hasReachedMax, isTrue); // 2 * 20 = 40 >= 35, all results covered
+      expect(state.hasMore, isFalse);
+    });
+
+    test('18. Fallback deduplication handles articles without URL using title, timestamp, and source', () async {
+      final articleNoUrl1 = NewsArticle(
+        title: 'Breaking Headline Without URL',
+        url: '',
+        publishedAt: DateTime(2026, 10, 14, 12, 0),
+        source: const NewsSource(id: 'source-1', name: 'Source 1'),
+      );
+      final duplicateNoUrl = NewsArticle(
+        title: 'Breaking Headline Without URL',
+        url: '',
+        publishedAt: DateTime(2026, 10, 14, 12, 0),
+        source: const NewsSource(id: 'source-1', name: 'Source 1'),
+      );
+      final uniqueNoUrl = NewsArticle(
+        title: 'Different Headline Without URL',
+        url: '',
+        publishedAt: DateTime(2026, 10, 14, 13, 0),
+        source: const NewsSource(id: 'source-2', name: 'Source 2'),
+      );
+
+      mockRepository.onGetTopHeadlines = ({category, country, sources, page = 1, pageSize = 20, query}) {
+        if (page == 1) {
+          return PaginatedNews(articles: [articleNoUrl1], totalResults: 10);
+        }
+        return PaginatedNews(articles: [duplicateNoUrl, uniqueNoUrl], totalResults: 10);
+      };
+
+      final notifier = container.read(newsFeedNotifierProvider.notifier);
+      await notifier.loadInitialHeadlines();
+
+      await notifier.fetchNextPage();
+      final state = container.read(newsFeedNotifierProvider);
+
+      expect(state.articles.length, 2); // articleNoUrl1 and uniqueNoUrl kept, duplicateNoUrl filtered
+      expect(state.articles.any((a) => a.title == 'Different Headline Without URL'), isTrue);
+    });
+
+    test('19. API limit maximumResultsReached cleanly stops pagination without error banner', () async {
+      final initialArticles = List.generate(20, (i) => createArticle('art_$i'));
+
+      mockRepository.onGetTopHeadlines = ({category, country, sources, page = 1, pageSize = 20, query}) {
+        if (page == 1) {
+          return PaginatedNews(articles: initialArticles, totalResults: 100);
+        }
+        throw const ServerError('Maximum results reached.', 426, 'maximumResultsReached');
+      };
+
+      final notifier = container.read(newsFeedNotifierProvider.notifier);
+      await notifier.loadInitialHeadlines();
+
+      await notifier.fetchNextPage();
+      final state = container.read(newsFeedNotifierProvider);
+
+      expect(state.articles.length, 20);
+      expect(state.isLoadingMore, isFalse);
+      expect(state.hasReachedMax, isTrue);
+      expect(state.hasMore, isFalse);
+      expect(state.paginationErrorMessage, isNull);
+    });
+
+    test('20. Failed pagination request retains current page and can be retried successfully', () async {
+      final initialArticles = List.generate(20, (i) => createArticle('init_$i'));
+      final page2Articles = [createArticle('page2_item')];
+      var page2Attempt = 0;
+
+      mockRepository.onGetTopHeadlines = ({category, country, sources, page = 1, pageSize = 20, query}) {
+        if (page == 1) {
+          return PaginatedNews(articles: initialArticles, totalResults: 50);
+        }
+        if (page == 2) {
+          page2Attempt++;
+          if (page2Attempt == 1) {
+            throw const NetworkError('Network dropped during pagination');
+          }
+          return PaginatedNews(articles: page2Articles, totalResults: 50);
+        }
+        return [];
+      };
+
+      final notifier = container.read(newsFeedNotifierProvider.notifier);
+      await notifier.loadInitialHeadlines();
+
+      // First attempt fails
+      await notifier.fetchNextPage();
+      var state = container.read(newsFeedNotifierProvider);
+
+      expect(state.articles.length, 20);
+      expect(state.page, 1); // Page NOT incremented on failure
+      expect(state.isLoadingMore, isFalse);
+      expect(state.paginationErrorMessage, 'Network dropped during pagination');
+
+      // Retry attempt succeeds
+      await notifier.fetchNextPage();
+      state = container.read(newsFeedNotifierProvider);
+
+      expect(state.articles.length, 21);
+      expect(state.page, 2); // Page incremented on success
+      expect(state.isLoadingMore, isFalse);
+      expect(state.paginationErrorMessage, isNull);
     });
   });
 }
