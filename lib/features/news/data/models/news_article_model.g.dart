@@ -1,0 +1,35 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'news_article_model.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
+
+NewsArticleModel _$NewsArticleModelFromJson(Map<String, dynamic> json) =>
+    NewsArticleModel(
+      source: json['source'] is Map<String, dynamic>
+          ? NewsSourceModel.fromJson(json['source'] as Map<String, dynamic>)
+          : null,
+      author: json['author'] as String?,
+      title: json['title'] as String?,
+      description: json['description'] as String?,
+      url: json['url'] as String?,
+      urlToImage: json['urlToImage'] as String?,
+      publishedAt: json['publishedAt'] is String
+          ? DateTime.tryParse(json['publishedAt'] as String)
+          : null,
+      content: json['content'] as String?,
+    );
+
+Map<String, dynamic> _$NewsArticleModelToJson(NewsArticleModel instance) =>
+    <String, dynamic>{
+      'source': instance.source?.toJson(),
+      'author': instance.author,
+      'title': instance.title,
+      'description': instance.description,
+      'url': instance.url,
+      'urlToImage': instance.urlToImage,
+      'publishedAt': instance.publishedAt?.toIso8601String(),
+      'content': instance.content,
+    };
